@@ -21,11 +21,19 @@ git clone git@github.com:ymatuhin/skills.git ~/.claude/skills
 ~/.claude/skills/sync-links.sh
 ```
 
-Дальше начните задачу в проекте:
+Дальше начните задачу в проекте. В Codex:
+
+```
+$outline Добавить экспорт отчёта в CSV
+```
+
+В Claude Code:
 
 ```
 /outline Добавить экспорт отчёта в CSV
 ```
+
+Примеры ниже используют синтаксис Claude Code (`/имя`). В Codex заменяйте префикс каждого вызова на `$`, включая вложенный: `$ask-agents $review-changes <путь>`.
 
 ### Что нужно
 
