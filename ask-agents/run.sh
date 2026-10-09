@@ -1,79 +1,89 @@
 #!/usr/bin/env bash
-# Запускает внешних агентов read-only, каждого в своей модели по умолчанию с high effort, параллельно. Протокол работы — PROTOCOL.md.
-# Агента-хоста не запускает: из Claude — только Codex, из Codex — только Claude; хост не определён — оба.
-# Перед запуском Claude обновляет его через `brew upgrade --cask claude-code@latest`; Codex — симлинк на CLI из ChatGPT.app, обновляется с приложением.
-#   run.sh [-C каталог] < промпт                                — раунд 1, одинаковый промпт всем
-#   run.sh [-C каталог] --skill <имя> '<аргументы>'             — раунд 1 скилом: Codex получает `$имя аргументы`, Claude — `/имя аргументы`
-#   run.sh [-C каталог] --resume <каталог прогона> [агент] < промпт — следующий раунд в тех же сессиях
+# Запускает Codex и Claude параллельно, read-only, каждого в своей модели по умолчанию с high effort. Порядок работы — SKILL.md.
+# Перед раундом 1 обновляет Claude через `brew upgrade --cask claude-code@latest` (не дольше 120 с); Codex — симлинк на CLI из ChatGPT.app, обновляется с приложением.
+#   run.sh [-C каталог] < промпт                          — раунд 1: один промпт обоим агентам
+#   run.sh [-C каталог] --cross <каталог прогона> [агент] — раунд 2 или 3 перекрёстной проверки в тех же сессиях
+# Команду скила в начале промпта (`/имя` или `$имя`) скрипт передаёт Codex как `$имя`, Claude — как `/имя`.
+# К промпту раунда 1 добавляет ROUND-1.md, промпт следующих раундов собирает из CROSS.md.
 # Файлы раунда — <каталог прогона>/<агент>/round-<N>/, ответ агента — answer.md.
-# Печатает каталог прогона, строку «host: …» и по строке на агента: «<агент>: ok <путь к ответу>» или «<агент>: failed — <причина>».
+# Печатает каталог прогона, строку «раунд N: …» и по строке на агента: «<агент>: ok <путь к ответу>» или «<агент>: failed — <причина>».
 # Прогон агента ограничен ASK_AGENTS_TIMEOUT секундами (по умолчанию 1200). Код выхода 0, если ответил хотя бы один агент.
 set -uo pipefail
 
+here=$(cd "$(dirname "$0")" && pwd)
+max_round=3
 dir=$PWD
-skill=""
-args=""
 D=""
 only=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -C) [ $# -ge 2 ] || { echo "-C: нужен каталог" >&2; exit 2; }; dir=$2; shift 2 ;;
-    --skill) [ $# -ge 3 ] && [ -n "$2" ] || { echo "--skill: нужны имя скила и строка аргументов" >&2; exit 2; }; skill=$2; args=$3; shift 3 ;;
-    --resume)
-      [ -d "${2:-}" ] || { echo "--resume: нужен каталог прогона" >&2; exit 2; }
+    --cross)
+      [ -d "${2:-}" ] || { echo "--cross: нужен каталог прогона" >&2; exit 2; }
       D=$(cd "$2" && pwd); shift 2
       case "${1:-}" in codex|claude) only=$1; shift ;; esac ;;
     *) echo "неизвестный аргумент: $1" >&2; exit 2 ;;
   esac
 done
-[ -z "$skill" ] || [ -z "$D" ] || { echo "--skill и --resume несовместимы" >&2; exit 2; }
 limit=${ASK_AGENTS_TIMEOUT:-1200}
 case "$limit" in ''|*[!0-9]*|0) echo "ASK_AGENTS_TIMEOUT: нужно целое число секунд больше 0" >&2; exit 2 ;; esac
 command -v jq >/dev/null || { echo "нужен jq" >&2; exit 2; }
-
 cd "$dir" || exit 2
-if [ -z "$skill" ]; then
-  prompt=$(cat)
-  [ -n "$prompt" ] || { echo "пустой промпт" >&2; exit 2; }
-fi
 
-if [ -n "$D" ]; then
-  # Продолжаем агентов, у которых в прогоне есть раунд 1.
-  host=resume; agents=""
-  for a in codex claude; do
-    [ -z "$only" ] || [ "$a" = "$only" ] || continue
-    [ -d "$D/$a/round-1" ] && agents="$agents $a"
-  done
-  agents=${agents# }
-  [ -n "$agents" ] || { echo "в $D нет раунда 1${only:+ у $only}" >&2; exit 2; }
-else
-  # Хост — по переменным, которые агент выставляет своим шеллам; при обоих наборах хост неоднозначен.
-  is_claude=${CLAUDECODE:-}
-  is_codex=${CODEX_THREAD_ID:-${CODEX_SESSION_ID:-}}
-  if [ -n "$is_claude" ] && [ -z "$is_codex" ]; then
-    host=claude; agents="codex"
-  elif [ -n "$is_codex" ] && [ -z "$is_claude" ]; then
-    host=codex; agents="claude"
-  else
-    host=unknown; agents="codex claude"
+other() { [ "$1" = codex ] && echo claude || echo codex; }
+title() { [ "$1" = codex ] && echo Codex || echo Claude; }
+id_prefix() { [ "$1" = codex ] && echo CX || echo CL; }
+
+# Подставляет {ключ} в шаблоне: fill <файл> ключ значение ...
+fill() {
+  local text k
+  text=$(cat "$1"); shift
+  while [ $# -ge 2 ]; do k="{$1}"; text=${text//"$k"/$2}; shift 2; done
+  printf '%s\n' "$text"
+}
+
+if [ -z "$D" ]; then
+  prompt=$(cat)
+  [ -n "${prompt//[[:space:]]/}" ] || { echo "пустой промпт" >&2; exit 2; }
+  # Команда скила — первое слово промпта; остальное идёт ей аргументами.
+  skill=""; rest=$prompt
+  if [[ $prompt =~ ^[[:space:]]*[/\$]([A-Za-z0-9][A-Za-z0-9:_-]*)([[:space:]]|$) ]]; then
+    skill=${BASH_REMATCH[1]}
+    rest=${prompt#*"$skill"}
   fi
+  agents="codex claude"
+  round=1
   D=$(mktemp -d /tmp/ask-agents.XXXX) || exit 2
+else
+  [ -z "$only" ] && agents="codex claude" || agents=$only
+  for a in $agents; do
+    [ -d "$D/$a/round-1" ] || { echo "в $D нет раунда 1 у $a" >&2; exit 2; }
+  done
+  # Номер раунда — следующий после последнего у любого из агентов: раунд 3 бывает у одного.
+  round=2
+  while [ -d "$D/codex/round-$round" ] || [ -d "$D/claude/round-$round" ]; do round=$((round + 1)); done
+  [ "$round" -le "$max_round" ] || { echo "раундов не больше $max_round: в $D уже есть раунд $max_round" >&2; exit 2; }
 fi
 echo "$D"
-echo "host: $host, запускаю: $agents"
+echo "раунд $round: $agents"
 
-# Каталог текущего раунда агента: R_codex, R_claude.
 for agent in $agents; do
-  n=1
-  while [ -d "$D/$agent/round-$n" ]; do n=$((n + 1)); done
-  C="$D/$agent/round-$n"
+  C="$D/$agent/round-$round"
   mkdir -p "$C"
   printf -v "R_$agent" '%s' "$C"
-  if [ -n "$skill" ]; then
-    [ "$agent" = codex ] && sigil='$' || sigil='/'
-    printf '%s%s %s\n' "$sigil" "$skill" "$args" > "$C/prompt.md"
+  if [ "$round" = 1 ]; then
+    {
+      if [ -n "$skill" ]; then
+        [ "$agent" = codex ] && printf '$%s' "$skill" || printf '/%s' "$skill"
+      fi
+      printf '%s\n\n' "$rest"
+      fill "$here/ROUND-1.md" ID "$(id_prefix "$agent")"
+    } > "$C/prompt.md"
   else
-    printf '%s\n' "$prompt" > "$C/prompt.md"
+    o=$(other "$agent")
+    last=""
+    [ "$round" = "$max_round" ] && last="Это последний раунд: новых находок не добавляй."
+    fill "$here/CROSS.md" OTHER "$(title "$o")" ANSWER "$D/$o/round-$((round - 1))/answer.md" LAST "$last" > "$C/prompt.md"
   fi
 done
 
@@ -100,16 +110,16 @@ any_alive() {
   return 1
 }
 
-# Запускает команду с лимитом в секундах: по истечении убивает её со всеми потомками (TERM, через 5 с — KILL), причину пишет в $C/timeout. В macOS нет `timeout`.
+# Запускает команду с лимитом в секундах: по истечении убивает её со всеми потомками (TERM, через 5 с — KILL), причину пишет в файл-метку. В macOS нет `timeout`.
 run_limited() {
-  local secs=$1 C=$2 t=0 p pids
+  local secs=$1 mark=$2 t=0 p pids
   shift 2
   # Без явного <&0 фоновая команда получает stdin из /dev/null.
   "$@" <&0 &
   p=$!
   while kill -0 "$p" 2>/dev/null; do
     if [ "$t" -ge "$secs" ]; then
-      echo "не ответил за $secs с" > "$C/timeout"
+      echo "не ответил за $secs с" > "$mark"
       pids="$p $(descendants "$p")"
       kill -TERM $pids 2>/dev/null
       for t in 1 2 3 4 5; do any_alive $pids || break; sleep 1; done
@@ -124,12 +134,12 @@ run_limited() {
 # Зависший при старте CLI ловим за 15 с, а не за весь лимит прогона.
 smoke() {
   local C=$2
-  run_limited 15 "$C" "$1" --version < /dev/null > /dev/null 2>&1 && return 0
+  run_limited 15 "$C/timeout" "$1" --version < /dev/null > /dev/null 2>&1 && return 0
   echo 1 > "$C/exit"
   return 1
 }
 
-# Для следующего раунда нужен id сессии из раунда 1.
+# Для раундов 2–3 нужен id сессии из раунда 1.
 resume_id() {
   local C=$2 id
   [ "$C" != "$D/$1/round-1" ] || return 0
@@ -140,18 +150,37 @@ resume_id() {
   return 1
 }
 
-# Вложенному агенту не передаём переменные хоста, чтобы он определял хоста по себе.
+# Перекрёстной проверке нужен ответ другого агента за прошлый раунд.
+need_other_answer() {
+  local C=$2 a
+  [ "$round" = 1 ] && return 0
+  a="$D/$(other "$1")/round-$((round - 1))/answer.md"
+  [ -s "$a" ] && return 0
+  echo "нет ответа другого агента: $a" > "$C/err.txt"
+  echo 1 > "$C/exit"
+  return 1
+}
+
+# Вложенным агентам не передаём переменные хоста. MCP, плагины и приложения отключены: у них свои права, read-only песочница их не ограничивает.
+host_env=(env -u CLAUDECODE -u CODEX_THREAD_ID -u CODEX_SESSION_ID -u CODEX_SANDBOX -u CODEX_SANDBOX_NETWORK_DISABLED)
+
 run_codex() {
-  local C id
+  local C id s
+  local -a off
   C=$(round_dir codex)
+  need_other_answer codex "$C" || return
   smoke codex "$C" || return
   id=$(resume_id codex "$C") || return
+  off=(--disable plugins --disable apps --disable computer_use)
+  for s in $(codex "${off[@]}" mcp list --json 2>/dev/null | jq -r '.[] | select(.enabled) | .name'); do
+    off+=(-c "mcp_servers.$s.enabled=false")
+  done
   if [ -n "$id" ]; then
-    set -- exec resume --skip-git-repo-check -c model_reasoning_effort=high -c sandbox_mode=read-only --json -o "$C/answer.md" "$id" -
+    set -- exec resume --skip-git-repo-check -c model_reasoning_effort=high -c sandbox_mode=read-only "${off[@]}" --json -o "$C/answer.md" "$id" -
   else
-    set -- exec --skip-git-repo-check -c model_reasoning_effort=high -s read-only --json -o "$C/answer.md" -
+    set -- exec --skip-git-repo-check -c model_reasoning_effort=high -s read-only "${off[@]}" --json -o "$C/answer.md" -
   fi
-  run_limited "$limit" "$C" env -u CLAUDECODE codex "$@" \
+  run_limited "$limit" "$C/timeout" "${host_env[@]}" codex "$@" \
     < "$C/prompt.md" > "$C/events.jsonl" 2> "$C/err.txt"
   echo $? > "$C/exit"
 }
@@ -159,16 +188,19 @@ run_codex() {
 run_claude() {
   local C id
   C=$(round_dir claude)
-  # Обновляем CLI перед запуском; сбой обновления запуск не останавливает.
-  command -v brew >/dev/null && HOMEBREW_NO_ENV_HINTS=1 brew upgrade --cask claude-code@latest > "$C/upgrade.txt" 2>&1
+  need_other_answer claude "$C" || return
+  # Обновляем CLI перед раундом 1: в resume версия не меняется. Сбой или зависание обновления запуск не останавливает.
+  if [ "$round" = 1 ] && command -v brew >/dev/null; then
+    run_limited 120 "$C/upgrade-timeout" env HOMEBREW_NO_ENV_HINTS=1 brew upgrade --cask claude-code@latest < /dev/null > "$C/upgrade.txt" 2>&1
+  fi
   smoke claude "$C" || return
   id=$(resume_id claude "$C") || return
   set --
   [ -z "$id" ] || set -- --resume "$id"
-  run_limited "$limit" "$C" env -u CLAUDECODE -u CODEX_THREAD_ID -u CODEX_SESSION_ID -u CODEX_SANDBOX -u CODEX_SANDBOX_NETWORK_DISABLED \
-    claude -p "$@" --effort high --permission-mode dontAsk --add-dir "$D" \
+  run_limited "$limit" "$C/timeout" "${host_env[@]}" \
+    claude -p "$@" --effort high --permission-mode dontAsk --strict-mcp-config --add-dir "$D" --add-dir "$(dirname "$here")" \
     --allowedTools 'Read,Grep,Glob,Bash(git status *),Bash(git diff *),Bash(git log *),Bash(git show *),Bash(git ls-files *)' \
-    --disallowedTools 'Edit,Write,NotebookEdit' \
+    --disallowedTools 'Edit,Write,NotebookEdit,Bash(git * --output*)' \
     --append-system-prompt "Работаешь только на чтение. Файлы читай через Read, Grep и Glob. Bash — только git status/diff/log/show/ls-files, без cd и цепочек команд: рабочий каталог уже $PWD." \
     --output-format json \
     < "$C/prompt.md" > "$C/result.json" 2> "$C/err.txt"
