@@ -199,7 +199,7 @@ run_claude() {
   [ -z "$id" ] || set -- --resume "$id"
   run_limited "$limit" "$C/timeout" "${host_env[@]}" \
     claude -p "$@" --effort high --permission-mode dontAsk --strict-mcp-config --add-dir "$D" --add-dir "$(dirname "$here")" \
-    --allowedTools 'Read,Grep,Glob,Bash(git status *),Bash(git diff *),Bash(git log *),Bash(git show *),Bash(git ls-files *)' \
+    --allowedTools 'Read,Grep,Glob,WebSearch,WebFetch,Bash(git status *),Bash(git diff *),Bash(git log *),Bash(git show *),Bash(git ls-files *)' \
     --disallowedTools 'Edit,Write,NotebookEdit,Bash(git * --output*)' \
     --append-system-prompt "Работаешь только на чтение. Файлы читай через Read, Grep и Glob. Bash — только git status/diff/log/show/ls-files, без cd и цепочек команд: рабочий каталог уже $PWD." \
     --output-format json \
