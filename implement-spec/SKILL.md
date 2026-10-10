@@ -16,7 +16,7 @@ Communication to and from subagents should be sparse. Communicate primarily thro
 
 **Implementer subagents** should be run in the background where possible for maximum concurrency.
 
-Each implementer gets one **commit-sized** unit of work. For larger tickets, run fresh implementers sequentially on the ticket's branch, each continuing from the previous commit.
+Use a fresh implementer for each ticket. Pass references to the ticket and relevant files, not conversation history. Never reuse an implementer for another ticket.
 
 ## Steps
 
