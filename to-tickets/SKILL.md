@@ -30,7 +30,7 @@ Break the work into **tracer bullet** tickets.
 
 - Each slice cuts a narrow but COMPLETE path through every layer (schema, API, UI, tests): vertical, NOT a horizontal slice of one layer
 - A completed slice is demoable or verifiable on its own
-- Each ticket is one independently verifiable unit of work. Split independent items into separate tickets, even when repetitive.
+- Each ticket is one independently verifiable unit of work. Every ticket costs a cold start, so merge items that touch the same module and can't run in parallel; split only for parallelism or separate verification.
 - Any prefactoring should be done first
 
 </vertical-slice-rules>
