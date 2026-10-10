@@ -1,36 +1,47 @@
-ADR — запись неочевидного решения: контекст, что решили и почему, что из этого следует для кода. Главный читатель — агент или разработчик, который без ADR «починит» намеренное.
+# ADR Format
 
-## Где и как называть
+ADRs live in `docs/adr/` and use sequential numbering: `0001-slug.md`, `0002-slug.md`, etc.
 
-`docs/adr/` рядом с ближайшим `GLOSSARY.md`, решения на весь репозиторий — `docs/adr/` в корне. Имя — `NNNN-slug.md`: номер из четырёх цифр, следующий после максимального в этой папке; slug латиницей через дефис.
+Create the `docs/adr/` directory lazily: only when the first ADR is needed.
 
-## Формат
-
-В проекте уже есть ADR — повторяй их структуру; шаблон ниже — для первого.
+## Template
 
 ```md
-# NNNN. <Решение одной фразой>
+# {Short title of the decision}
 
-<Контекст и решение прозой: какая проблема, что решили и почему. Можно одним абзацем.>
-
-## Последствия
-
-- <Что из решения следует для кода: правила, ограничения, инварианты «меняешь X — меняй Y», риски, где реализовано.>
+{1-3 sentences: what's the context, what did we decide, and why.}
 ```
 
-## Правила
+That's it. An ADR can be a single paragraph. The value is in recording *that* a decision was made and *why*, not in filling out sections.
 
-- Заголовок формулирует решение, а не тему: «Все URL заканчиваются на /», а не «Trailing slash».
-- Проза — контекст, решение, причина. Код не пересказывай, ссылайся на него.
-- `## Последствия` обязательны: по ним агент пишет код.
-- Связанные ADR, термины GLOSSARY.md и файлы — относительными ссылками прямо в тексте, путь считается от файла ADR.
-- Статусов нет. Решение отменили — удали ADR или пометь в заголовке. Решение уточнили — правь существующий ADR, не пиши новый поверх.
-- Пиши на языке документации проекта.
+## Optional sections
 
-## Необязательные части
+Only include these when they add genuine value. Most ADRs won't need them.
 
-Добавляй, только когда они дают пользу; у большинства ADR их нет.
+- **Status** frontmatter (`proposed | accepted | deprecated | superseded by ADR-NNNN`): useful when decisions are revisited
+- **Considered Options**: only when the rejected alternatives are worth remembering
+- **Consequences**: only when non-obvious downstream effects need to be called out
 
-- **Смысловые секции** между прозой и «Последствиями» — когда решение объёмное: таблицы, конвенции, разбор по частям. Заголовок называет суть: `## Что бандлим, что оставляем внешним`.
-- **`## Отклонено`** перед «Последствиями» — когда отвергнутый вариант неочевиден и его будут предлагать снова. Одна строка на вариант: `- <вариант> — <почему нет>`. Мелкие отказы оставляй в прозе.
-- **`Пересмотреть: …`** последним пунктом «Последствий» — когда у решения есть условие устаревания: версия библиотеки с исправленным багом или событие («когда появятся теги релизов»).
+## Numbering
+
+Scan `docs/adr/` for the highest existing number and increment by one.
+
+## When to offer an ADR
+
+All three of these must be true:
+
+1. **Hard to reverse**: the cost of changing your mind later is meaningful
+2. **Surprising without context**: a future reader will look at the code and wonder "why on earth did they do it this way?"
+3. **The result of a real trade-off**: there were genuine alternatives and you picked one for specific reasons
+
+If a decision is easy to reverse, skip it: you'll just reverse it. If it's not surprising, nobody will wonder why. If there was no real alternative, there's nothing to record beyond "we did the obvious thing."
+
+### What qualifies
+
+- **Architectural shape.** "We're using a monorepo." "The write model is event-sourced, the read model is projected into Postgres."
+- **Integration patterns between contexts.** "Ordering and Billing communicate via domain events, not synchronous HTTP."
+- **Technology choices that carry lock-in.** Database, message bus, auth provider, deployment target. Not every library: just the ones that would take a quarter to swap out.
+- **Boundary and scope decisions.** "Customer data is owned by the Customer context; other contexts reference it by ID only." The explicit no-s are as valuable as the yes-s.
+- **Deliberate deviations from the obvious path.** "We're using manual SQL instead of an ORM because X." Anything where a reasonable reader would assume the opposite. These stop the next engineer from "fixing" something that was deliberate.
+- **Constraints not visible in the code.** "We can't use AWS because of compliance requirements." "Response times must be under 200ms because of the partner API contract."
+- **Rejected alternatives when the rejection is non-obvious.** If you considered GraphQL and picked REST for subtle reasons, record it; otherwise someone will suggest GraphQL again in six months.

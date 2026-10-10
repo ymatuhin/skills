@@ -1,45 +1,16 @@
 ---
 name: handoff
-description: Сжимает текущий разговор в документ передачи в каталоге задачи в /tmp/handoffs, по которому новая сессия продолжит работу без истории.
-argument-hint: "Для чего следующая сессия"
+description: Compact the current conversation into a handoff document for another agent to pick up.
+argument-hint: "What will the next session be used for?"
 disable-model-invocation: true
 ---
 
-Создай каталог задачи `/tmp/handoffs/<yyyy-mm-dd>-<slug>/` и в нём документ `handoff.md`, по которому агент без истории этого разговора сможет продолжить работу. Остальные файлы задачи (описание PR, итоги ревью) хранятся в этом же каталоге.
+Write a handoff document summarising the current conversation so a fresh agent can continue the work. Save to the temporary directory of the user's OS (`$TMPDIR`, else `/tmp`; `%TEMP%` on Windows) - not the current workspace.
 
-Если переданы аргументы — это задача следующей сессии: пиши документ под неё, остальное из разговора упоминай только как контекст.
+Include a "suggested skills" section in the document, naming which skills the next agent should call the Skill tool for.
 
-Переноси только то, что есть в разговоре: решения, варианты, значения, сценарии, сигнатуры и код, которых не называли, не добавляй. Утверждение о коде, которое в разговоре не сверяли с кодом, пометь «(не проверено)». Сначала заполни «Записи» — текст, которого ещё нет в файлах (записи документов, согласованные формулировки), дословно; потом остальные разделы — только тем, чего в «Записях» нет. На файлы ссылайся путём от корня репозитория.
+Do not duplicate content already captured in other artifacts (specs, plans, ADRs, issues, commits, diffs). Reference them by path or URL instead.
 
-## Шаблон
+Redact any sensitive information, such as API keys, passwords, or personally identifiable information.
 
-```md
-# <Задача>
-
-Цель: одно предложение — результат, который должна получить следующая сессия.
-Не делаем: <что вне границ, если этого нет в «Записях»>
-
-## Записи
-
-- <Файл, действие, якорь>: итоговый текст дословно
-
-## Решения
-
-- <Принятое решение одной строкой, если его нет в «Записях»>
-
-## Швы
-
-- <Интерфейс>: <сценарии, названные в разговоре, без ожидаемых значений>
-
-## Ссылки
-
-- <Путь к файлу, не названному выше>
-```
-
-Если в разговоре есть пункты ревью со статусом «ожидает» — добавь раздел «Находки ревью»: абсолютный путь к файлу с ними или сами пункты дословно. По нему `implement` исправит эти пункты.
-
-Пустые разделы убирай. Решения — только принятые, без хронологии обсуждения.
-
-Команды следующих шагов показаны для Codex (`$имя`). В Claude Code замени префикс каждого вызова на `/`, включая вложенный вызов: `$ask-agents $review-changes` → `/ask-agents /review-changes`.
-
-По окончании предложи для новой сессии `$review-plan <путь>`, отдельно — то же через двух агентов `$ask-agents $review-plan <путь>`, и `$implement <путь>`; каждую команду отдельным fenced-блоком без языка.
+If the user passed arguments, treat them as a description of what the next session will focus on and tailor the doc accordingly.

@@ -1,54 +1,30 @@
 ---
 name: grilling
-description: Раунды вопросов пользователю о решениях — формат В1, В2… с рекомендацией первой; обоснованное и дешёвое решает сам и показывает списком, спорное и дорогое спрашивает.
-user-invocable: false
+description: Grill the user relentlessly about a plan, decision, or idea. Use when the user wants to stress-test their thinking, or uses any 'grill' trigger phrases.
 ---
 
-Доводи задачу до общего понимания раундами вопросов.
+Interview the user relentlessly until you reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it.
 
-## Факты
+Work the tree in **rounds**. The **frontier** is every decision whose prerequisites are already settled: the questions you can ask _now_ without guessing at answers you haven't heard yet. Ask the whole frontier in one round: number each question and give your recommended answer. Then wait for the user's answers before the next round.
 
-Факты в коде, конфигах, логах, документах ищи сам. Утверждение, на котором держится вопрос, рекомендация, отказ от варианта или решение по умолчанию, проверь по коду — и на граничных значениях: ноль, пусто, один элемент, максимум, который принимает код. Не подтвердилось — убери решение, а не только причину. Факт, который есть только у пользователя (окружение, шаги воспроизведения, договорённости вне репозитория), — вопрос без вариантов.
+Format a round like so:
 
-## Решения
+```
+❓ **Q1** - **<question title>**: <question body, might be multiple paragraphs, including multiple choices>
 
-По умолчанию решай сам и показывай решение в «Решено по умолчанию» с причиной — молча предположенным ничего не остаётся.
-
-Выноси вопросом, если верно хотя бы одно:
-
-- Дорого ошибиться: рекомендуемый вариант меняет контракт API или данных, публичное поведение вне задачи, инструкции агенту (AGENTS.md, CLAUDE.md), миграции, удаляет сверх запрошенного, или переделка выйдет за пределы одного места. Спрашивай, даже если рекомендация очевидна.
-- Нечем обосновать: выбор упирается в приоритеты, вкус, допустимый риск или ограничения, которых нет в коде, документах и разговоре, и варианты заметно различаются для пользователя. Различие только в устройстве кода при равном результате — не повод спрашивать.
-- Конфликт: расходится с принятым решением (документ, спека, ADR, слова пользователя) или меняет границы задачи.
-
-Найденная по пути проблема, которой нет в запросе, — строкой «Вне задачи» в «Решено по умолчанию»; вопросом — только если без неё не работает основной сценарий задачи.
-
-Рекомендацию проверь основным сценарием задачи: если её компромисс — сценарий не работает, это не рекомендация. Рекомендация не расширяет границы задачи. «Как у соседнего кода» — довод, только если у соседа та же цель. Переименование и рефакторинг поведение не меняют: эталон — старый код, любое отличие — регрессия, а не вариант.
-
-## Состав раунда
-
-В раунд включай все вопросы, чьи предпосылки уже решены. Вопрос, зависящий от открытого в этом раунде, — в следующий раунд; запись, зависящая от открытого вопроса, — в этот же раунд по рекомендации. Не задавай вопрос, ответ на который уже есть в запросе или разговоре; принятое в прошлых раундах не повторяй.
-
-## Формат
-
-Раунд начинай сразу с вопросов, без пересказа изученного и своих действий. Сквозные номера В1, В2… в рамках разговора. У вопроса-решения 2+ реальных варианта, рекомендация первой; варианты различаются по сути, в том числе условием («можно, если …»); вариант, который не проходит основной сценарий или расширяет задачу, не добавляй. Одна строка на вариант: решение и, если есть, главный компромисс. Вопрос-факт — без вариантов.
-
-После вопросов — «Решено по умолчанию»: по строке на решение, которое пользователь мог бы принять иначе, — что и почему, без рассуждений. Устройство кода при равном результате и то, что предписано правилами проекта или существующим кодом, — не сюда. Список выводи и без вопросов; нет решений — не выводи.
-
-```md
-**В1.** <тело вопроса, может быть несколько параграфов>
-
-1. <рекомендация>, но <компромисс>
-2. <вариант>, но <компромисс>
+➡️ <your recommended answer>
 
 ---
 
-**В2.** ...
+❓ **Q2** - **<question title>**: <question body, might be multiple paragraphs, including multiple choices>
+
+➡️ <your recommended answer>
 ```
 
-## Ответы
+Word each question so "yes" accepts your recommended answer.
 
-«Ок/+» принимает все рекомендации раунда и решения по умолчанию. Ответ по части вопросов: названные — по ответу, остальные вопросы-решения — по рекомендации, вопрос-факт без ответа остаётся открытым. Отменённое решение по умолчанию или ответ не по рекомендации переоткрывают зависящие от них пункты — в следующий раунд.
+Each round the user answers reshapes the tree: settled decisions push the frontier outward and unblock questions that depended on them. Recompute the frontier and ask the next round. A question whose answer depends on another question still open in this round belongs to a _later_ round, not this one.
 
-Пока вопрос открыт, не действуй по зависящим от него пунктам; независимую работу продолжай.
+Finding _facts_ is your job, never the user's. When a frontier question needs a fact from the environment (filesystem, tools, etc.), dispatch a sub-agent to find it; don't ask the user for anything you could look up yourself. Don't block on it: a running exploration is an unsettled prerequisite, so only the questions downstream of it wait for the sub-agent to report; ask the rest of the frontier now. The _decisions_ are the user's: put each to them and wait.
 
-Когда открытых вопросов нет — вернись к вызвавшему скилу: следующий шаг предлагает он.
+The session is done when the frontier is empty: every branch of the design tree visited, nothing left silently assumed. Do not act on it until the user confirms you have reached a shared understanding.
