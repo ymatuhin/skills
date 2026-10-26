@@ -12,31 +12,28 @@ The goal is the entire spec implemented on a single **integration branch**, with
 
 The tickets are not a list of steps. They are a **task graph** with blocking relationships between them. This means there is always a **frontier** of tickets which are ready to be grabbed.
 
-Communication to and from subagents should be sparse. Communicate primarily through **context pointers**: to the spec, tickets, research notes, and previous commits. Don't duplicate information already available via pointers.
+## Sessions
 
-**Implementer subagents** should be run in the background where possible for maximum concurrency.
+Work runs in parallel **sessions** started with `mcp__ccd_session__start_session` (`initiation: "user_asked"`, `context: "fresh"`). Briefs are **context pointers** to the spec, tickets, research notes, and commits, not copies of them.
 
-Use a fresh implementer for each ticket. Pass references to the ticket and relevant files, not conversation history. Never reuse an implementer for another ticket.
+An **implementer session** gets exactly one ticket. Start it with `use_worktree: true` and `source_branch` set to the integration branch. Its brief: build the ticket with the `tdd` skill, commit, merge the integration branch tip into its branch, report the branch name.
 
 ## Steps
 
 1. Read the spec and tickets to understand the task graph.
 
-2. When two or more tickets need the same lookup, use an **exploration subagent** to conduct any exploration required by the tickets - relevant codebase files or external documentation. Ensure the exploration subagent can save files - it should save its markdown notes in a directory outside the repo, accessible by all future subagents. This lets **implementer subagents** focus on implementation rather than exploration.
+2. When two or more tickets need the same lookup, start one **exploration session** (`use_worktree: false`, cheaper `model`) that saves markdown notes outside the repo. Point implementers at the notes.
 
-3. Create the integration branch. If the issue tracker closes work through PRs, or the user asks for one, open a draft PR after the first merge in step 5 (a branch with no commits ahead of main can't open one), marked as closing the spec and tickets.
+3. Create the integration branch. If the issue tracker closes work through PRs, or the user asks for one, open a draft PR after the first merge in step 5, marked as closing the spec and tickets.
 
-4. Use **implementer subagents** to implement each ticket, each in its own worktree on its own branch. Each implementer subagent:
-   - confirms its worktree is based on the integration branch before starting, and resets onto it if not;
-   - calls the Skill tool with `tdd` to build the ticket;
-   - merges the integration branch tip into its own branch before reporting done
+4. Start implementer sessions for the whole frontier in one message.
 
-5. Once an **implementer subagent** completes, merge its work to the integration branch with a **merger subagent**.
+5. When an implementer finishes, merge its branch into the integration branch yourself. On a conflict, abort and ask that session to merge the new tip again.
 
-6. If this changes the **frontier** of available tickets, kick off more **implementer subagents** to work on the new tickets. This allows for maximum concurrency.
+6. When the frontier grows, start implementers for the new tickets.
 
-7. Once all tickets are complete, call the Skill tool with `code-review` on the integration branch. Fix all issues raised by the code review in a single **implementer subagent**.
+7. Once all tickets are merged, run the `code-review` skill on the integration branch and fix its findings in one implementer session.
 
 8. If a draft PR exists, mark it ready for review. Otherwise, resolve each ticket the way the issue tracker closes work, and report the integration branch.
 
-9. Clean up all **implementer subagent** worktrees and their temporary branches.
+9. Archive the sessions, delete their branches and leftover worktrees.
